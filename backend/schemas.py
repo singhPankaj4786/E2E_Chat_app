@@ -1,15 +1,14 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
-# Used for POST /users/signup
+# --- User Schemas ---
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-    public_key: str  # Must match the 'public_key' field in your React payload
+    public_key: str
 
-# Used for User responses (GET /users/all)
 class UserOut(BaseModel):
     id: int
     username: str
@@ -19,18 +18,21 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
-# Used for GET /chat/history
+# --- Message Schemas ---
+
+# Used when receiving a message from the frontend via API (if used)
+class MessageCreate(BaseModel):
+    recipient_id: int
+    content: str # Added for plain-text phase
+
+# Used when sending history back to the frontend
 class MessageOut(BaseModel):
     id: int
     sender_id: int
     recipient_id: int
-    encrypted_content: str
+    content: Optional[str] = None # Added for plain-text phase
+    encrypted_content: Optional[str] = None # Kept for future E2EE
     timestamp: datetime
 
     class Config:
         from_attributes = True
-
-# Used for POST /chat/send
-class MessageCreate(BaseModel):
-    recipient_id: int
-    encrypted_content: str

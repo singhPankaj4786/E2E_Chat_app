@@ -94,7 +94,7 @@ export const decryptMessage = async (encryptedPackage, privateKey) => {
             "raw",
             aesKeyBuffer,
             "AES-GCM",
-            true,
+            "AES-GCM",
             ["decrypt"]
         );
 
