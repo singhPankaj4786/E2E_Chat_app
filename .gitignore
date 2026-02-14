@@ -1,0 +1,27 @@
+# Python Virtual Environments (add ALL these lines)
+backend/chatapp/
+backend/venv/
+backend/env/
+backend/.venv/
+**/venv/
+**/env/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+backend/.env
+backend/*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

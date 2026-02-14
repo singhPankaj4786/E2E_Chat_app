@@ -1,0 +1,9 @@
+/* src/index.css */
+@import "tailwindcss";
+
+/* Add this to ensure the body takes up the full screen height */
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
