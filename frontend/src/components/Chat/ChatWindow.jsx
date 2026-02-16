@@ -4,26 +4,22 @@ import api from "../../api/axios";
 import { decryptMessage } from "../../utils/crypto";
 import { getPrivateKey } from "../../utils/storage";
 
-const ChatWindow = ({ recipient }) => {
+const ChatWindow = ({ recipient, onlineUsers }) => {
   const [newMessage, setNewMessage] = useState("");
   const { messages, setMessages, sendMessage, isConnected } =
     useChat(recipient);
   const scrollRef = useRef(null);
   const myId = parseInt(localStorage.getItem("userId"));
 
-  // 🔐 Load & decrypt history on recipient change
+  // 🔐 Load & decrypt history
   useEffect(() => {
     if (!recipient?.id) return;
 
     const loadHistory = async () => {
       try {
         const res = await api.get(`/chat/history/${recipient.id}`);
-
         const privateKey = await getPrivateKey();
-        if (!privateKey) {
-          console.error("Private key missing.");
-          return;
-        }
+        if (!privateKey) return;
 
         const decryptedMessages = await Promise.all(
           res.data.map(async (msg) => {
@@ -31,21 +27,17 @@ const ChatWindow = ({ recipient }) => {
               const decryptedText = await decryptMessage(
                 {
                   ciphertext: msg.encrypted_content,
-                  encryptedAesKey: msg.encrypted_key, // ✅ correct field
+                  encryptedAesKey: msg.encrypted_key,
                   iv: msg.iv,
                 },
-                privateKey,
+                privateKey
               );
 
-              return {
-                ...msg,
-                content: decryptedText,
-              };
-            } catch (err) {
-              console.error("History message decryption failed:", err);
+              return { ...msg, content: decryptedText };
+            } catch {
               return null;
             }
-          }),
+          })
         );
 
         setMessages(decryptedMessages.filter(Boolean));
@@ -65,40 +57,42 @@ const ChatWindow = ({ recipient }) => {
   // 📤 Send message
   const onSend = async (e) => {
     e.preventDefault();
-
     if (!newMessage.trim() || !isConnected) return;
-
     await sendMessage(newMessage);
     setNewMessage("");
   };
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
-
     const date = new Date(timestamp);
-
     return date.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
   };
 
+  const isUserOnline = onlineUsers?.[recipient.id];
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex items-center gap-3">
+      <div className="p-4 border-b border-gray-200 flex items-center gap-3 bg-white">
         <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
           {recipient.username[0].toUpperCase()}
         </div>
+
         <div>
-          <h2 className="font-bold">{recipient.username}</h2>
-          <span
-            className={`text-[10px] font-bold ${
-              isConnected ? "text-green-500" : "text-gray-400"
+          <h2 className="font-semibold text-gray-900">
+            {recipient.username}
+          </h2>
+
+          <p
+            className={`text-xs font-medium ${
+              isUserOnline ? "text-green-500" : "text-gray-400"
             }`}
           >
-            {isConnected ? "● ONLINE" : "○ CONNECTING..."}
-          </span>
+            {isUserOnline ? "● Online" : "○ Offline"}
+          </p>
         </div>
       </div>
 
@@ -112,20 +106,16 @@ const ChatWindow = ({ recipient }) => {
             }`}
           >
             <div
-              className={`max-w-[65%] px-3 py-2 rounded-2xl ${
+              className={`max-w-[65%] px-3 py-2 rounded-2xl shadow-sm ${
                 msg.sender_id === myId
                   ? "bg-blue-600 text-white"
-                  : "bg-white border"
+                  : "bg-white border border-gray-200"
               }`}
             >
-              <div className="flex items-end gap-2">
-                <p className="text-sm break-words leading-tight">
-                  {msg.content}
-                </p>
+              <p className="text-sm leading-relaxed">{msg.content}</p>
 
-                <span className="text-[10px] opacity-70 whitespace-nowrap leading-none">
-                  {formatTimestamp(msg.timestamp)}
-                </span>
+              <div className="text-[10px] mt-1 text-right opacity-60">
+                {formatTimestamp(msg.timestamp)}
               </div>
             </div>
           </div>
@@ -134,18 +124,18 @@ const ChatWindow = ({ recipient }) => {
       </div>
 
       {/* Input */}
-      <form onSubmit={onSend} className="p-4 border-t border-gray-200">
+      <form onSubmit={onSend} className="p-4 border-t border-gray-200 bg-white">
         <div className="flex gap-2">
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type a message..."
-            className="flex-1 p-3 bg-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-3 py-2 bg-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
           <button
             type="submit"
-            className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700"
+            className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 text-sm"
           >
             Send
           </button>
