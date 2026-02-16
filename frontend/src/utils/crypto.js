@@ -1,17 +1,28 @@
 // src/utils/crypto.js
 
-// Helper to convert ArrayBuffer to Base64 String
-const ab2str = (buf) => window.btoa(String.fromCharCode(...new Uint8Array(buf)));
+// ---------- Safe Base64 Helpers ----------
 
-// Helper to convert Base64 String to ArrayBuffer
-const str2ab = (str) => {
-    const buf = new ArrayBuffer(str.length);
-    const bufView = new Uint8Array(buf);
-    for (let i = 0; i < str.length; i++) {
-        bufView[i] = str.charCodeAt(i);
+// ArrayBuffer -> Base64
+const ab2b64 = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
     }
-    return buf;
+    return window.btoa(binary);
 };
+
+// Base64 -> ArrayBuffer
+const b642ab = (base64) => {
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+};
+
+// ---------- RSA Key Generation ----------
 
 export const generateKeyPair = async () => {
     const keyPair = await window.crypto.subtle.generateKey(
@@ -25,89 +36,198 @@ export const generateKeyPair = async () => {
         ["encrypt", "decrypt"]
     );
 
-    const publicKeyBuffer = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
-    const publicKeyString = ab2str(publicKeyBuffer);
+    const publicKeyBuffer = await window.crypto.subtle.exportKey(
+        "spki",
+        keyPair.publicKey
+    );
 
-    return { publicKeyString, privateKey: keyPair.privateKey };
+    const publicKeyString = ab2b64(publicKeyBuffer);
+
+    return {
+        publicKeyString,
+        privateKey: keyPair.privateKey,
+    };
 };
 
-export const encryptForRecipient = async (text, recipientPublicKeyPEM) => {
+// ---------- Hybrid Encryption ----------
+
+export const encryptForRecipient = async (text, recipientPublicKeyBase64) => {
     try {
-        // 1. Import Recipient's Public Key
-        const binaryDerString = window.atob(recipientPublicKeyPEM);
-        const binaryDer = str2ab(binaryDerString);
+        // 1️⃣ Import recipient's RSA public key
         const publicKey = await window.crypto.subtle.importKey(
             "spki",
-            binaryDer,
-            { name: "RSA-OAEP", hash: "SHA-256" },
-            true,
+            b642ab(recipientPublicKeyBase64),
+            {
+                name: "RSA-OAEP",
+                hash: "SHA-256",
+            },
+            false,
             ["encrypt"]
         );
 
-        // 2. Generate temporary AES key for this message
+        // 2️⃣ Generate random AES-256-GCM key
+        const aesKey = await window.crypto.subtle.generateKey(
+            {
+                name: "AES-GCM",
+                length: 256,
+            },
+            true, // must be extractable so we can encrypt it via RSA
+            ["encrypt", "decrypt"]
+        );
+
+        // 3️⃣ Generate random IV (12 bytes recommended for GCM)
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+        // 4️⃣ Encrypt message with AES-GCM
+        const encodedText = new TextEncoder().encode(text);
+
+        const ciphertext = await window.crypto.subtle.encrypt(
+            {
+                name: "AES-GCM",
+                iv: iv,
+            },
+            aesKey,
+            encodedText
+        );
+
+        // 5️⃣ Export AES key (raw) so we can encrypt it
+        const exportedAesKey = await window.crypto.subtle.exportKey(
+            "raw",
+            aesKey
+        );
+
+        // 6️⃣ Encrypt AES key using recipient's RSA public key
+        const encryptedAesKey = await window.crypto.subtle.encrypt(
+            {
+                name: "RSA-OAEP",
+            },
+            publicKey,
+            exportedAesKey
+        );
+
+        return {
+            ciphertext: ab2b64(ciphertext),
+            encryptedAesKey: ab2b64(encryptedAesKey),
+            iv: ab2b64(iv),
+        };
+    } catch (err) {
+        console.error("Encryption error:", err);
+        throw err;
+    }
+};
+
+// ---------- Decryption ----------
+
+export const decryptMessage = async (encryptedPackage, privateKey) => {
+    try {
+        const { ciphertext, encryptedAesKey, iv } = encryptedPackage;
+
+        // 1️⃣ Decrypt AES key using our private RSA key
+        const decryptedAesKeyBuffer = await window.crypto.subtle.decrypt(
+            {
+                name: "RSA-OAEP",
+            },
+            privateKey,
+            b642ab(encryptedAesKey)
+        );
+
+        // 2️⃣ Import decrypted AES key
+        const aesKey = await window.crypto.subtle.importKey(
+            "raw",
+            decryptedAesKeyBuffer,
+            {
+                name: "AES-GCM",
+            },
+            false,
+            ["decrypt"]
+        );
+
+        // 3️⃣ Decrypt message
+        const decryptedBuffer = await window.crypto.subtle.decrypt(
+            {
+                name: "AES-GCM",
+                iv: b642ab(iv),
+            },
+            aesKey,
+            b642ab(ciphertext)
+        );
+
+        return new TextDecoder().decode(decryptedBuffer);
+    } catch (err) {
+        console.error("Decryption failed (possible tampering or wrong key):", err);
+        throw err;
+    }
+};
+export const encryptForBoth = async (
+    text,
+    recipientPublicKeyBase64,
+    senderPublicKeyBase64
+) => {
+    try {
+        // 1️⃣ Import recipient public key
+        const recipientPublicKey = await window.crypto.subtle.importKey(
+            "spki",
+            b642ab(recipientPublicKeyBase64),
+            { name: "RSA-OAEP", hash: "SHA-256" },
+            false,
+            ["encrypt"]
+        );
+
+        // 2️⃣ Import sender public key
+        const senderPublicKey = await window.crypto.subtle.importKey(
+            "spki",
+            b642ab(senderPublicKeyBase64),
+            { name: "RSA-OAEP", hash: "SHA-256" },
+            false,
+            ["encrypt"]
+        );
+
+        // 3️⃣ Generate AES-256-GCM key
         const aesKey = await window.crypto.subtle.generateKey(
             { name: "AES-GCM", length: 256 },
             true,
-            ["encrypt"]
+            ["encrypt", "decrypt"]
         );
 
-        // 3. Encrypt the Message with AES
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
         const encodedText = new TextEncoder().encode(text);
+
         const ciphertext = await window.crypto.subtle.encrypt(
             { name: "AES-GCM", iv },
             aesKey,
             encodedText
         );
 
-        // 4. Encrypt the AES key with Recipient's RSA Public Key
-        const exportedAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
-        const encryptedAesKey = await window.crypto.subtle.encrypt(
-            { name: "RSA-OAEP" },
-            publicKey,
-            exportedAesKey
+        // 4️⃣ Export AES key
+        const exportedAesKey = await window.crypto.subtle.exportKey(
+            "raw",
+            aesKey
         );
+
+        // 5️⃣ Encrypt AES key separately
+        const encryptedKeyForRecipient =
+            await window.crypto.subtle.encrypt(
+                { name: "RSA-OAEP" },
+                recipientPublicKey,
+                exportedAesKey
+            );
+
+        const encryptedKeyForSender =
+            await window.crypto.subtle.encrypt(
+                { name: "RSA-OAEP" },
+                senderPublicKey,
+                exportedAesKey
+            );
 
         return {
-            ciphertext: ab2str(ciphertext),
-            iv: ab2str(iv),
-            encryptedAesKey: ab2str(encryptedAesKey)
+            ciphertext: ab2b64(ciphertext),
+            iv: ab2b64(iv),
+            encrypted_key_for_recipient: ab2b64(encryptedKeyForRecipient),
+            encrypted_key_for_sender: ab2b64(encryptedKeyForSender),
         };
     } catch (err) {
-        console.error("Encryption Logic Error:", err);
-        throw err;
-    }
-};
-
-export const decryptMessage = async (encryptedPackage, privateKey) => {
-    try {
-        const { ciphertext, iv, encryptedAesKey } = encryptedPackage;
-
-        // 1. Decrypt the AES Key using our Private Key
-        const aesKeyBuffer = await window.crypto.subtle.decrypt(
-            { name: "RSA-OAEP" },
-            privateKey,
-            str2ab(window.atob(encryptedAesKey))
-        );
-
-        const aesKey = await window.crypto.subtle.importKey(
-            "raw",
-            aesKeyBuffer,
-            "AES-GCM",
-            "AES-GCM",
-            ["decrypt"]
-        );
-
-        // 2. Decrypt the message
-        const decryptedBuffer = await window.crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: str2ab(window.atob(iv)) },
-            aesKey,
-            str2ab(window.atob(ciphertext))
-        );
-
-        return new TextDecoder().decode(decryptedBuffer);
-    } catch (err) {
-        console.error("Decryption Logic Error:", err);
+        console.error("Dual encryption error:", err);
         throw err;
     }
 };

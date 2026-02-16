@@ -49,7 +49,8 @@ async def login(
         "access_token": access_token, 
         "token_type": "bearer",
         "username": user.username,
-        "user_id": user.id
+        "user_id": user.id,
+        "public_key": user.public_key
     }
 
 @router.get("/all", response_model=List[schemas.UserOut])

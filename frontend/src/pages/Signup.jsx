@@ -39,6 +39,7 @@ const Signup = () => {
             localStorage.setItem('token', loginRes.data.access_token);
             localStorage.setItem('username', loginRes.data.username);
             localStorage.setItem('userId', loginRes.data.user_id);
+            localStorage.setItem('public_key', loginRes.data.public_key);
 
             navigate('/dashboard');
         } catch (err) {

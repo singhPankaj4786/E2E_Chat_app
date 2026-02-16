@@ -19,10 +19,12 @@ const Login = () => {
             const res = await api.post('/users/login', loginData, {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             });
-
-            localStorage.setItem('token', res.data.access_token);
+            console.log("Login response:", res.data);
+                localStorage.setItem('token', res.data.access_token);
             localStorage.setItem('username', res.data.username);
             localStorage.setItem('userId', res.data.user_id);
+            localStorage.setItem('public_key', res.data.public_key);
+
 
             navigate('/dashboard');
         } catch (err) {

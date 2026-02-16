@@ -29,59 +29,115 @@ manager = ConnectionManager()
 
 @router.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str):
-    # 1. Accept the connection ONLY ONCE at the very beginning
     await websocket.accept()
-    
     db = SessionLocal()
     user = None
+
     try:
-        # 2. Authenticate
         user = await auth.get_current_user_from_token(token, db)
-        
-        # 3. Add to manager (without calling accept again)
         await manager.connect(user.id, websocket)
-        
+
         while True:
             data = await websocket.receive_text()
             message_data = json.loads(data)
-            
-            recipient_id = int(message_data.get("recipient_id"))
-            content = message_data.get("content")
 
-            # Save to Database
+            recipient_id = int(message_data.get("recipient_id"))
+
+            ciphertext = message_data.get("ciphertext")
+            encrypted_key_for_recipient = message_data.get("encrypted_key_for_recipient")
+            encrypted_key_for_sender = message_data.get("encrypted_key_for_sender")
+            iv = message_data.get("iv")
+
+            # Save to database
             new_msg = models.Message(
                 sender_id=user.id,
                 recipient_id=recipient_id,
-                content=content
+                encrypted_content=ciphertext,
+                encrypted_key_for_recipient=encrypted_key_for_recipient,
+                encrypted_key_for_sender=encrypted_key_for_sender,
+                iv=iv
             )
+
             db.add(new_msg)
             db.commit()
-            
-            # Broadcast the message
-            broadcast_data = {
+            db.refresh(new_msg)
+
+            # Prepare two different payloads
+
+            # 🔐 Payload for recipient
+            recipient_payload = {
                 "id": new_msg.id,
                 "sender_id": user.id,
-                "content": content,
-                "timestamp": datetime.utcnow().isoformat()
+                "recipient_id": recipient_id,
+                "encrypted_content": ciphertext,
+                "encrypted_key": encrypted_key_for_recipient,
+                "iv": iv,
+                "timestamp": new_msg.timestamp.isoformat()
             }
-            await manager.send_personal_message(json.dumps(broadcast_data), recipient_id)
-            
+
+            # 🔐 Payload for sender
+            sender_payload = {
+                "id": new_msg.id,
+                "sender_id": user.id,
+                "recipient_id": recipient_id,
+                "encrypted_content": ciphertext,
+                "encrypted_key": encrypted_key_for_sender,
+                "iv": iv,
+                "timestamp": new_msg.timestamp.isoformat()
+            }
+
+            # Send to recipient
+            await manager.send_personal_message(
+                json.dumps(recipient_payload),
+                recipient_id
+            )
+
+            # Send back to sender
+            await manager.send_personal_message(
+                json.dumps(sender_payload),
+                user.id
+            )
+
+                    
+
     except Exception as e:
         print(f"WS Error: {e}")
     finally:
         if user:
             manager.disconnect(user.id)
         db.close()
+
+
 @router.get("/history/{recipient_id}")
 async def get_chat_history(
-    recipient_id: int, 
-    db: Session = Depends(auth.get_db), 
+    recipient_id: int,
+    db: Session = Depends(auth.get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    # Fetch messages between the two users
     messages = db.query(models.Message).filter(
-        ((models.Message.sender_id == current_user.id) & (models.Message.recipient_id == recipient_id)) |
-        ((models.Message.sender_id == recipient_id) & (models.Message.recipient_id == current_user.id))
+        ((models.Message.sender_id == current_user.id) &
+         (models.Message.recipient_id == recipient_id)) |
+        ((models.Message.sender_id == recipient_id) &
+         (models.Message.recipient_id == current_user.id))
     ).order_by(models.Message.timestamp.asc()).all()
-    
-    return messages
+
+    result = []
+
+    for msg in messages:
+        # Decide which encrypted key this user should receive
+        if current_user.id == msg.sender_id:
+            encrypted_key = msg.encrypted_key_for_sender
+        else:
+            encrypted_key = msg.encrypted_key_for_recipient
+
+        result.append({
+            "id": msg.id,
+            "sender_id": msg.sender_id,
+            "recipient_id": msg.recipient_id,
+            "encrypted_content": msg.encrypted_content,
+            "encrypted_key": encrypted_key,
+            "iv": msg.iv,
+            "timestamp": msg.timestamp
+        })
+
+    return result
