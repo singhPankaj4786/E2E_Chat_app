@@ -40,6 +40,20 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         while True:
             data = await websocket.receive_text()
             message_data = json.loads(data)
+            # Handle typing event
+            if message_data.get("type") == "typing":
+                recipient_id = int(message_data.get("recipient_id"))
+
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "typing",
+                        "sender_id": user.id
+                    }),
+                    recipient_id
+                )
+
+                continue
+
 
             recipient_id = int(message_data.get("recipient_id"))
 

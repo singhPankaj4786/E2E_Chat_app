@@ -6,8 +6,15 @@ import { getPrivateKey } from "../../utils/storage";
 
 const ChatWindow = ({ recipient, onlineUsers }) => {
   const [newMessage, setNewMessage] = useState("");
-  const { messages, setMessages, sendMessage, isConnected } =
-    useChat(recipient);
+  const {
+    messages,
+    setMessages,
+    sendMessage,
+    isConnected,
+    isTyping,
+    sendTyping,
+  } = useChat(recipient);
+
   const scrollRef = useRef(null);
   const myId = parseInt(localStorage.getItem("userId"));
 
@@ -88,10 +95,18 @@ const ChatWindow = ({ recipient, onlineUsers }) => {
 
           <p
             className={`text-xs font-medium ${
-              isUserOnline ? "text-green-500" : "text-gray-400"
+              isTyping
+                ? "text-blue-500"
+                : isUserOnline
+                ? "text-green-500"
+                : "text-gray-400"
             }`}
           >
-            {isUserOnline ? "● Online" : "○ Offline"}
+            {isTyping
+              ? "Typing..."
+              : isUserOnline
+              ? "● Online"
+              : "○ Offline"}
           </p>
         </div>
       </div>
@@ -129,7 +144,10 @@ const ChatWindow = ({ recipient, onlineUsers }) => {
           <input
             type="text"
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={(e) => {
+              setNewMessage(e.target.value);
+              sendTyping();
+            }}
             placeholder="Type a message..."
             className="flex-1 px-3 py-2 bg-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
