@@ -12,51 +12,50 @@ const ChatWindow = ({ recipient }) => {
   const myId = parseInt(localStorage.getItem("userId"));
 
   // 🔐 Load & decrypt history on recipient change
- useEffect(() => {
+  useEffect(() => {
     if (!recipient?.id) return;
 
     const loadHistory = async () => {
-        try {
-            const res = await api.get(`/chat/history/${recipient.id}`);
+      try {
+        const res = await api.get(`/chat/history/${recipient.id}`);
 
-            const privateKey = await getPrivateKey();
-            if (!privateKey) {
-                console.error("Private key missing.");
-                return;
-            }
-
-            const decryptedMessages = await Promise.all(
-                res.data.map(async (msg) => {
-                    try {
-                        const decryptedText = await decryptMessage(
-                            {
-                                ciphertext: msg.encrypted_content,
-                                encryptedAesKey: msg.encrypted_key, // ✅ correct field
-                                iv: msg.iv,
-                            },
-                            privateKey
-                        );
-
-                        return {
-                            ...msg,
-                            content: decryptedText,
-                        };
-                    } catch (err) {
-                        console.error("History message decryption failed:", err);
-                        return null;
-                    }
-                })
-            );
-
-            setMessages(decryptedMessages.filter(Boolean));
-        } catch (err) {
-            console.error("Failed to load history:", err);
+        const privateKey = await getPrivateKey();
+        if (!privateKey) {
+          console.error("Private key missing.");
+          return;
         }
+
+        const decryptedMessages = await Promise.all(
+          res.data.map(async (msg) => {
+            try {
+              const decryptedText = await decryptMessage(
+                {
+                  ciphertext: msg.encrypted_content,
+                  encryptedAesKey: msg.encrypted_key, // ✅ correct field
+                  iv: msg.iv,
+                },
+                privateKey,
+              );
+
+              return {
+                ...msg,
+                content: decryptedText,
+              };
+            } catch (err) {
+              console.error("History message decryption failed:", err);
+              return null;
+            }
+          }),
+        );
+
+        setMessages(decryptedMessages.filter(Boolean));
+      } catch (err) {
+        console.error("Failed to load history:", err);
+      }
     };
 
     loadHistory();
-}, [recipient]);
-
+  }, [recipient]);
 
   // 🔄 Auto scroll
   useEffect(() => {
@@ -73,10 +72,21 @@ const ChatWindow = ({ recipient }) => {
     setNewMessage("");
   };
 
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return "";
+
+    const date = new Date(timestamp);
+
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="p-4 border-b flex items-center gap-3">
+      <div className="p-4 border-b border-gray-200 flex items-center gap-3">
         <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
           {recipient.username[0].toUpperCase()}
         </div>
@@ -102,13 +112,21 @@ const ChatWindow = ({ recipient }) => {
             }`}
           >
             <div
-              className={`max-w-[70%] p-3 rounded-2xl shadow-sm ${
+              className={`max-w-[65%] px-3 py-2 rounded-2xl ${
                 msg.sender_id === myId
                   ? "bg-blue-600 text-white"
                   : "bg-white border"
               }`}
             >
-              <p className="text-sm">{msg.content}</p>
+              <div className="flex items-end gap-2">
+                <p className="text-sm break-words leading-tight">
+                  {msg.content}
+                </p>
+
+                <span className="text-[10px] opacity-70 whitespace-nowrap leading-none">
+                  {formatTimestamp(msg.timestamp)}
+                </span>
+              </div>
             </div>
           </div>
         ))}
@@ -116,7 +134,7 @@ const ChatWindow = ({ recipient }) => {
       </div>
 
       {/* Input */}
-      <form onSubmit={onSend} className="p-4 border-t">
+      <form onSubmit={onSend} className="p-4 border-t border-gray-200">
         <div className="flex gap-2">
           <input
             type="text"

@@ -72,7 +72,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                 "encrypted_content": ciphertext,
                 "encrypted_key": encrypted_key_for_recipient,
                 "iv": iv,
-                "timestamp": new_msg.timestamp.isoformat()
+                "timestamp": new_msg.timestamp.isoformat()+ "Z"
             }
 
             # 🔐 Payload for sender
@@ -83,7 +83,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                 "encrypted_content": ciphertext,
                 "encrypted_key": encrypted_key_for_sender,
                 "iv": iv,
-                "timestamp": new_msg.timestamp.isoformat()
+                "timestamp": new_msg.timestamp.isoformat()+ "Z"
             }
 
             # Send to recipient
@@ -137,7 +137,8 @@ async def get_chat_history(
             "encrypted_content": msg.encrypted_content,
             "encrypted_key": encrypted_key,
             "iv": msg.iv,
-            "timestamp": msg.timestamp
+            "timestamp": msg.timestamp.isoformat() + "Z"
+
         })
 
     return result

@@ -28,5 +28,5 @@ class Message(Base):
     encrypted_key_for_recipient = Column(String, nullable=False)
 
     iv = Column(String, nullable=False)
-
+    
     timestamp = Column(DateTime, default=datetime.utcnow)
