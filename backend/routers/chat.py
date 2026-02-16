@@ -54,6 +54,19 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
                 continue
 
+            # Inside the while True loop of your websocket_endpoint in chat.py
+            if message_data.get("type") == "mark_read":
+                sender_id = int(message_data.get("sender_id"))
+                
+                # Update all messages from this sender to the current user as read
+                db.query(models.Message).filter(
+                    models.Message.sender_id == sender_id,
+                    models.Message.recipient_id == user.id,
+                    models.Message.is_read == False
+                ).update({"is_read": True})
+                
+                db.commit()
+                continue
 
             recipient_id = int(message_data.get("recipient_id"))
 
@@ -138,10 +151,10 @@ async def get_chat_history(
     result = []
 
     for msg in messages:
-        # Decide which encrypted key this user should receive
         if current_user.id == msg.sender_id:
             encrypted_key = msg.encrypted_key_for_sender
         else:
+            # Otherwise, give them the key encrypted with the recipient's public key
             encrypted_key = msg.encrypted_key_for_recipient
 
         result.append({

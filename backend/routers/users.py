@@ -58,5 +58,15 @@ def get_all_users(
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    # Returns all users except yourself
-    return db.query(models.User).filter(models.User.id != current_user.id).all()
+    users = db.query(models.User).filter(models.User.id != current_user.id).all()
+    
+    for user in users:
+        # Count messages where this user is the sender and current_user is the recipient
+        unread = db.query(models.Message).filter(
+            models.Message.sender_id == user.id,
+            models.Message.recipient_id == current_user.id,
+            models.Message.is_read == False
+        ).count()
+        user.unread_count = unread
+        
+    return users

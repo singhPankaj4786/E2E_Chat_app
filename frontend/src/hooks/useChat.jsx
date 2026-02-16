@@ -1,135 +1,101 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { encryptForBoth, decryptMessage } from "../utils/crypto";
-import { getPrivateKey } from "../utils/storage";
+import { useState, useEffect, useCallback } from 'react';
+import api from '../api/axios';
+import { decryptMessage } from '../utils/crypto';
+import { getPrivateKey } from '../utils/storage';
 
-const useChat = (recipient) => {
-  const [messages, setMessages] = useState([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const socketRef = useRef(null);
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef(null);
-
-  const myId = parseInt(localStorage.getItem("userId"));
-
-  useEffect(() => {
-    if (!recipient?.id) return;
-
+const useChat = (recipient, setUnreadCounts) => {
+    const [messages, setMessages] = useState([]);
+    const [isTyping, setIsTyping] = useState(false);
+    const [socket, setSocket] = useState(null);
     const token = localStorage.getItem("token");
-    if (!token) return;
+    const currentUserId = parseInt(localStorage.getItem("userId"));
 
-    const socket = new WebSocket(`ws://localhost:8000/chat/ws/${token}`);
+    // 1. Fetch History
+    useEffect(() => {
+        if (!recipient) return;
+        const loadHistory = async () => {
+            try {
+                const privKey = await getPrivateKey();
+                const res = await api.get(`/chat/history/${recipient.id}`);
+                const decryptedHistory = await Promise.all(res.data.map(async (msg) => {
+                    try {
+                        const plaintext = await decryptMessage({
+                            ciphertext: msg.encrypted_content,
+                            encryptedAesKey: msg.encrypted_key, 
+                            iv: msg.iv
+                        }, privKey);
+                        return { ...msg, decrypted_content: plaintext };
+                    } catch (e) { return { ...msg, decrypted_content: "[Decryption Error]" }; }
+                }));
+                setMessages(decryptedHistory);
+            } catch (err) { console.error("History error:", err); }
+        };
+        loadHistory();
+    }, [recipient]);
 
-    socketRef.current = socket;
+    // 2. WebSocket Logic
+    useEffect(() => {
+        if (!token) return;
+        const ws = new WebSocket(`ws://localhost:8000/chat/ws/${token}`);
+        
+        ws.onopen = () => {
+            setSocket(ws);
+            if (recipient && ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));
+                // Immediately clear count locally when socket opens for this recipient
+                setUnreadCounts(prev => ({ ...prev, [recipient.id]: 0 }));
+            }
+        };
 
-    socket.onopen = () => {
-      setIsConnected(true);
-    };
+        ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === "typing") {
+                if (data.sender_id === recipient?.id) {
+                    setIsTyping(true);
+                    setTimeout(() => setIsTyping(false), 3000);
+                }
+            } else if (data.encrypted_content) {
+                if (recipient && (data.sender_id === recipient.id || data.sender_id === currentUserId)) {
+                    try {
+                        const privKey = await getPrivateKey();
+                        const plaintext = await decryptMessage({
+                            ciphertext: data.encrypted_content,
+                            encryptedAesKey: data.encrypted_key,
+                            iv: data.iv
+                        }, privKey);
+                        
+                        setMessages((prev) => [...prev, { ...data, decrypted_content: plaintext }]);
+                        
+                        // If we received a message in the active chat, mark as read
+                        if (data.sender_id === recipient.id) {
+                            if (ws.readyState === 1) {
+                                ws.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));
+                            }
+                            // Also ensure the local count stays at 0 for the active chat
+                            setUnreadCounts(prev => ({ ...prev, [recipient.id]: 0 }));
+                        }
+                    } catch (e) { console.error("Live Decryption Error", e); }
+                } else if (data.sender_id !== currentUserId) {
+                    // Update count only for background chats
+                    setUnreadCounts(prev => ({ ...prev, [data.sender_id]: (prev[data.sender_id] || 0) + 1 }));
+                }
+            }
+        };
+        return () => ws.close();
+    }, [token, recipient, setUnreadCounts, currentUserId]);
 
-    socket.onclose = () => {
-      setIsConnected(false);
-    };
-
-    socket.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === "typing") {
-        setIsTyping(true);
-
-        clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => {
-          setIsTyping(false);
-        }, 2000);
-
-        return;
-      }
-      // Only process messages relevant to this chat
-      if (data.sender_id === recipient.id || data.sender_id === myId) {
-        try {
-          const privateKey = await getPrivateKey();
-
-          const decrypted = await decryptMessage(
-            {
-              ciphertext: data.encrypted_content,
-              encryptedAesKey: data.encrypted_key,
-              iv: data.iv,
-            },
-            privateKey,
-          );
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              ...data,
-              content: decrypted,
-            },
-          ]);
-        } catch (err) {
-          console.error("Decryption failed:", err);
+    // 3. Clear unread locally when switching chats
+    useEffect(() => {
+        if (recipient && socket?.readyState === 1) {
+            socket.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));
+            setUnreadCounts(prev => ({ ...prev, [recipient.id]: 0 }));
         }
-      }
-    };
+    }, [recipient, socket, setUnreadCounts]);
 
-    return () => {
-      socket.close();
-    };
-  }, [recipient]);
+    const sendMessage = (data) => { if (socket?.readyState === 1) socket.send(JSON.stringify(data)); };
+    const sendTyping = () => { if (socket?.readyState === 1 && recipient) socket.send(JSON.stringify({ type: "typing", recipient_id: recipient.id })); };
 
-  const sendMessage = useCallback(
-    async (text) => {
-      if (!socketRef.current) return;
-      if (socketRef.current.readyState !== WebSocket.OPEN) return;
-
-      try {
-        const senderPublicKey = localStorage.getItem("public_key");
-
-        if (!senderPublicKey) {
-          console.error("Sender public key missing");
-          return;
-        }
-
-        const encryptedPackage = await encryptForBoth(
-          text,
-          recipient.public_key,
-          senderPublicKey,
-        );
-
-        socketRef.current.send(
-          JSON.stringify({
-            recipient_id: recipient.id,
-            ciphertext: encryptedPackage.ciphertext,
-            encrypted_key_for_recipient:
-              encryptedPackage.encrypted_key_for_recipient,
-            encrypted_key_for_sender: encryptedPackage.encrypted_key_for_sender,
-            iv: encryptedPackage.iv,
-          }),
-        );
-      } catch (err) {
-        console.error("Encryption failed:", err);
-      }
-    },
-    [recipient],
-  );
-  const sendTyping = () => {
-    if (!socketRef.current) return;
-    if (socketRef.current.readyState !== WebSocket.OPEN) return;
-
-    socketRef.current.send(
-        JSON.stringify({
-            type: "typing",
-            recipient_id: recipient.id,
-        })
-    );
-};
-
-
-  return {
-    messages,
-    setMessages,
-    sendMessage,
-    isConnected,
-    isTyping,
-    sendTyping,
-};
+    return { messages, sendMessage, sendTyping, isTyping };
 };
 
 export default useChat;

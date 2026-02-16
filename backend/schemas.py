@@ -19,7 +19,8 @@ class UserOut(BaseModel):
     username: str
     email: EmailStr
     public_key: str
-
+    unread_count: int = 0  # New field added to the schema
+    
     class Config:
         from_attributes = True
 
