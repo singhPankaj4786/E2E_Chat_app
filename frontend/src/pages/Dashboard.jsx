@@ -7,15 +7,18 @@ import useChat from '../hooks/useChat';
 const Dashboard = () => {
     const [activeChat, setActiveChat] = useState(null);
     const [unreadCounts, setUnreadCounts] = useState({}); 
-    const onlineUsers = usePresence(); // Global presence listener
+    
+    // Global presence listener for green/gray status dots
+    const onlineUsers = usePresence(); 
 
-    // LIFTED HOOK: Now listens for messages even when no chat is open
+    // Global chat listener: Keeps unread counts updated even on this screen
     const { messages, sendMessage, sendTyping, isTyping } = useChat(activeChat, setUnreadCounts);
 
     return (
-        <div className="flex h-[calc(100vh-64px)] bg-white overflow-hidden">
-            <div className="w-80 border-r border-gray-200 flex flex-col bg-gray-50">
-                <div className="p-4 border-b bg-white font-bold text-xl text-gray-800">
+        <div className="flex h-[calc(100vh-64px)] bg-[#fdfdfd] overflow-hidden">
+            {/* Sidebar Column: Using a soft shadow instead of a black border line */}
+            <div className="w-[320px] flex flex-col bg-white z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+                <div className="px-6 py-6 bg-white font-black text-2xl tracking-tighter text-gray-800">
                     Chats
                 </div>
                 <Sidebar 
@@ -27,22 +30,26 @@ const Dashboard = () => {
                 />
             </div>
 
-            <div className="flex-1 flex flex-col">
+            {/* Main Content Area */}
+            <div className="flex-1 bg-white flex flex-col relative">
                 {activeChat ? (
                     <ChatWindow 
                         key={activeChat.id} 
                         recipient={activeChat} 
                         onlineUsers={onlineUsers || {}} 
-                        // Passing hook states as props to maintain UI logic
                         messages={messages}
                         sendMessage={sendMessage}
                         sendTyping={sendTyping}
                         isTyping={isTyping}
                     />
                 ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 text-gray-400">
-                        <p className="text-lg font-medium text-blue-600">SecureChat E2EE</p>
-                        <p className="text-sm italic">Select a user to start a secure conversation</p>
+                    /* Pleasant Empty State */
+                    <div className="flex-1 flex flex-col items-center justify-center bg-[#f9fafb] text-gray-400">
+                        <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
+                            <span className="text-4xl">🔐</span>
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-700">Your Private Space</h2>
+                        <p className="text-sm text-gray-500 mt-1">Select a contact to start an end-to-end encrypted chat</p>
                     </div>
                 )}
             </div>
