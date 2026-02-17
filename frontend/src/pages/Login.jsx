@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api/axios';
+import { useKeyVault } from '../context/KeyContext'; // Import the vault hook
 
 const Login = () => {
     const navigate = useNavigate();
+    const { unlockVault } = useKeyVault(); // Initialize the unlock function
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -19,14 +21,23 @@ const Login = () => {
             const res = await api.post('/users/login', loginData, {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             });
-            console.log("Login response:", res.data);
-                localStorage.setItem('token', res.data.access_token);
+
+            // 1. Save basic session info to localStorage
+            localStorage.setItem('token', res.data.access_token);
             localStorage.setItem('username', res.data.username);
             localStorage.setItem('userId', res.data.user_id);
             localStorage.setItem('public_key', res.data.public_key);
 
+            // 2. Perform the "Initial Unlock" into RAM
+            // This decrypts the private key using the password provided in the form
+            const success = await unlockVault(res.data.user_id, password);
+            
+            if (success) {
+                navigate('/dashboard');
+            } else {
+                alert("Failed to unlock secure vault. Please check your credentials.");
+            }
 
-            navigate('/dashboard');
         } catch (err) {
             console.error("LOGIN_ERROR:", err.response?.data);
             alert(err.response?.data?.detail || "Invalid email or password");

@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { decryptMessage } from '../utils/crypto';
-import { getPrivateKey } from '../utils/storage';
+import { useKeyVault } from '../context/KeyContext';
 
 const useChat = (recipient, setUnreadCounts) => {
     const [messages, setMessages] = useState([]);
@@ -9,13 +9,17 @@ const useChat = (recipient, setUnreadCounts) => {
     const [socket, setSocket] = useState(null);
     const token = localStorage.getItem("token");
     const currentUserId = parseInt(localStorage.getItem("userId"));
+    
+    // Get the unlocked RSA key directly from RAM
+    const { unlockedKey } = useKeyVault();
 
-    // 1. Fetch History
+    // 1. Unified Fetch History & Decryption
     useEffect(() => {
-        if (!recipient) return;
+        // Only run if we have a recipient AND the vault is unlocked
+        if (!recipient || !unlockedKey) return;
+
         const loadHistory = async () => {
             try {
-                const privKey = await getPrivateKey();
                 const res = await api.get(`/chat/history/${recipient.id}`);
                 const decryptedHistory = await Promise.all(res.data.map(async (msg) => {
                     try {
@@ -23,26 +27,27 @@ const useChat = (recipient, setUnreadCounts) => {
                             ciphertext: msg.encrypted_content,
                             encryptedAesKey: msg.encrypted_key, 
                             iv: msg.iv
-                        }, privKey);
+                        }, unlockedKey); // Use RAM key
                         return { ...msg, decrypted_content: plaintext };
-                    } catch (e) { return { ...msg, decrypted_content: "[Decryption Error]" }; }
+                    } catch (e) { 
+                        return { ...msg, decrypted_content: "[Decryption Error]" }; 
+                    }
                 }));
                 setMessages(decryptedHistory);
             } catch (err) { console.error("History error:", err); }
         };
         loadHistory();
-    }, [recipient]);
+    }, [recipient, unlockedKey]); 
 
-    // 2. WebSocket Logic
+    // 2. WebSocket Logic with RAM Decryption
     useEffect(() => {
-        if (!token) return;
+        if (!token || !currentUserId || !unlockedKey) return;
         const ws = new WebSocket(`ws://localhost:8000/chat/ws/${token}`);
         
         ws.onopen = () => {
             setSocket(ws);
             if (recipient && ws.readyState === 1) {
                 ws.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));
-                // Immediately clear count locally when socket opens for this recipient
                 setUnreadCounts(prev => ({ ...prev, [recipient.id]: 0 }));
             }
         };
@@ -57,34 +62,30 @@ const useChat = (recipient, setUnreadCounts) => {
             } else if (data.encrypted_content) {
                 if (recipient && (data.sender_id === recipient.id || data.sender_id === currentUserId)) {
                     try {
-                        const privKey = await getPrivateKey();
                         const plaintext = await decryptMessage({
                             ciphertext: data.encrypted_content,
                             encryptedAesKey: data.encrypted_key,
                             iv: data.iv
-                        }, privKey);
+                        }, unlockedKey); // Use RAM key
                         
                         setMessages((prev) => [...prev, { ...data, decrypted_content: plaintext }]);
                         
-                        // If we received a message in the active chat, mark as read
                         if (data.sender_id === recipient.id) {
                             if (ws.readyState === 1) {
                                 ws.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));
                             }
-                            // Also ensure the local count stays at 0 for the active chat
                             setUnreadCounts(prev => ({ ...prev, [recipient.id]: 0 }));
                         }
                     } catch (e) { console.error("Live Decryption Error", e); }
                 } else if (data.sender_id !== currentUserId) {
-                    // Update count only for background chats
                     setUnreadCounts(prev => ({ ...prev, [data.sender_id]: (prev[data.sender_id] || 0) + 1 }));
                 }
             }
         };
         return () => ws.close();
-    }, [token, recipient, setUnreadCounts, currentUserId]);
+    }, [token, recipient, setUnreadCounts, currentUserId, unlockedKey]);
 
-    // 3. Clear unread locally when switching chats
+    // 3. Mark Read on Chat Switch
     useEffect(() => {
         if (recipient && socket?.readyState === 1) {
             socket.send(JSON.stringify({ type: "mark_read", sender_id: recipient.id }));

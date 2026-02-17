@@ -4,11 +4,22 @@ import Navbar from './components/Auth/Navbar';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
+import { useKeyVault } from './context/KeyContext';
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  // If no token, force redirect to login
-  return token ? children : <Navigate to="/login" replace />;
+  const { unlockedKey, isVaultLoading } = useKeyVault();
+
+  // 1. If still checking session storage, show a loader
+  if (isVaultLoading) return <div className="flex items-center justify-center h-screen">Loading Secure Vault...</div>;
+
+  // 2. If no token, go to login
+  if (!token) return <Navigate to="/login" replace />;
+
+  // 3. If token exists but vault is locked (not in session), go to login
+  if (!unlockedKey) return <Navigate to="/login" replace />;
+  
+  return children;
 };
 
 function App() {
@@ -16,7 +27,6 @@ function App() {
     <Router>
       <Navbar />
       <Routes>
-        {/* Explicit Routes */}
         <Route path="/signup" element={<Signup />} />
         <Route path="/login" element={<Login />} />
         <Route 
@@ -27,8 +37,6 @@ function App() {
             </ProtectedRoute>
           } 
         />
-        
-        {/* Force any unknown path or the root path to Signup */}
         <Route path="/" element={<Navigate to="/signup" replace />} />
         <Route path="*" element={<Navigate to="/signup" replace />} />
       </Routes>

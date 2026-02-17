@@ -1,15 +1,28 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useKeyVault } from '../../context/KeyContext'; // Import context hook
+import { clearSessionKey } from '../../utils/storage'; // Import storage utility
 
 const Navbar = () => {
   const navigate = useNavigate();
+  const { clearVault } = useKeyVault(); // Hook to wipe RAM
   const token = localStorage.getItem('token');
   const username = localStorage.getItem('username');
 
   const handleLogout = () => {
+    // 1. Wipe the Unlocked Key from RAM (React Context)
+    clearVault();
+
+    // 2. Wipe the Unlocked Key from Session Storage
+    clearSessionKey();
+
+    // 3. Clear standard session data
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     localStorage.removeItem('userId');
+    localStorage.removeItem('public_key');
+
+    // 4. Redirect to login
     navigate('/login');
   };
 

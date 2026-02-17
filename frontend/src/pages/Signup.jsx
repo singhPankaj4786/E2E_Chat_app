@@ -1,55 +1,70 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { generateKeyPair } from '../utils/crypto';
-import { savePrivateKey } from '../utils/storage';
+import { savePrivateKey, setSessionKey } from '../utils/storage';
+import { useKeyVault } from '../context/KeyContext'; // Import vault hook
 import api from '../api/axios';
 
 const Signup = () => {
     const navigate = useNavigate();
+    const { setUnlockedKey } = useKeyVault(); // To unlock vault in RAM immediately
     const [formData, setFormData] = useState({ username: '', email: '', password: '' });
     const [loading, setLoading] = useState(false);
 
     const handleSignup = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        try {
-            // 1. Generate RSA Keys for End-to-End Encryption
-            const { publicKeyString, privateKey } = await generateKeyPair();
-            await savePrivateKey(privateKey);
+    e.preventDefault();
+    setLoading(true);
+    try {
+        console.log("1. Generating RSA Keys...");
+        const { publicKeyString, privateKey } = await generateKeyPair();
 
-            // 2. Register User (JSON payload)
-            const signupPayload = {
-                username: formData.username,
-                email: formData.email,
-                password: formData.password,
-                public_key: publicKeyString
-            };
-            await api.post('/users/signup', signupPayload);
+        console.log("2. Sending Signup Request...");
+        await api.post('/users/signup', {
+            username: formData.username,
+            email: formData.email,
+            password: formData.password,
+            public_key: publicKeyString
+        });
 
-            // 3. Auto-Login (Form-data payload to fix 422 error)
-            const loginData = new URLSearchParams();
-            loginData.append('username', formData.email); 
-            loginData.append('password', formData.password);
+        console.log("3. Attempting Auto-Login...");
+        const loginData = new URLSearchParams();
+        loginData.append('username', formData.email); 
+        loginData.append('password', formData.password);
 
-            const loginRes = await api.post('/users/login', loginData, {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-            });
+        const loginRes = await api.post('/users/login', loginData, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
 
-            // 4. Save Session and Redirect
-            localStorage.setItem('token', loginRes.data.access_token);
-            localStorage.setItem('username', loginRes.data.username);
-            localStorage.setItem('userId', loginRes.data.user_id);
-            localStorage.setItem('public_key', loginRes.data.public_key);
+        const { access_token, user_id, username, public_key } = loginRes.data;
+        console.log("Login Success, User ID:", user_id);
 
-            navigate('/dashboard');
-        } catch (err) {
-            console.error("SIGNUP_FLOW_ERROR:", err.response?.data);
-            const errorMsg = err.response?.data?.detail;
-            alert(Array.isArray(errorMsg) ? "Validation error. Check console." : errorMsg || "Signup failed");
-        } finally {
-            setLoading(false);
-        }
-    };
+        // --- THE CRITICAL PART ---
+        console.log("4. Locking Private Key to IndexedDB...");
+        await savePrivateKey(user_id, formData.password, privateKey);
+
+        console.log("5. Saving to Session RAM...");
+        const exported = await window.crypto.subtle.exportKey("pkcs8", privateKey);
+        const base64Key = btoa(String.fromCharCode(...new Uint8Array(exported)));
+        
+        setSessionKey(base64Key); // Survive Refresh
+        setUnlockedKey(privateKey); // Instant RAM Access
+
+        localStorage.setItem('token', access_token);
+        localStorage.setItem('username', username);
+        localStorage.setItem('userId', user_id);
+        localStorage.setItem('public_key', public_key);
+
+        console.log("6. Redirecting...");
+        navigate('/dashboard');
+    } catch (err) {
+        // Detailed error logging to fix the 'undefined' issue
+        console.error("FULL ERROR OBJECT:", err);
+        const errorMsg = err.response?.data?.detail || err.message || "An unexpected error occurred";
+        alert(errorMsg);
+    } finally {
+        setLoading(false);
+    }
+};
 
     return (
         <div className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] bg-gray-50 p-4">
