@@ -47,3 +47,6 @@ class MessageOut(BaseModel):
 
     class Config:
         from_attributes = True
+        
+class KeyUpdate(BaseModel):
+    public_key: str

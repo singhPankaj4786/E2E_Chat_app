@@ -24,6 +24,13 @@ class ConnectionManager:
     async def send_personal_message(self, message: str, user_id: int):
         if user_id in self.active_connections:
             await self.active_connections[user_id].send_text(message)
+    # Professional addition for security broadcasting
+    async def broadcast(self, message: str):
+        for user_id, connection in self.active_connections.items():
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                print(f"Broadcast failed for user {user_id}: {e}")
 
 manager = ConnectionManager()
 

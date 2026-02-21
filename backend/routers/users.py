@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List
 import auth, models, schemas
 from database import get_db
+from .chat import manager
+import json
 
 router = APIRouter()
 
@@ -70,3 +72,23 @@ def get_all_users(
         user.unread_count = unread
         
     return users
+
+@router.post("/update-public-key")
+async def update_public_key(
+    key_data: schemas.KeyUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    # 1. Update the database record
+    current_user.public_key = key_data.public_key
+    db.commit()
+    
+    # 2. Real-time Broadcast
+    # This notifies all online peers to trigger the 'Red Shield' alert
+    await manager.broadcast(json.dumps({
+        "type": "identity_change",
+        "user_id": current_user.id,
+        "new_public_key": key_data.public_key
+    }))
+    
+    return {"detail": "Identity reset successful. Peers notified."}
