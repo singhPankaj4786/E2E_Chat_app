@@ -51,3 +51,26 @@ export const logoutUser = () => {
     localStorage.clear();
     clearSessionKey(); // Crucial for security
 };
+
+/** * Saves a trusted public key for a specific contact, 
+ * isolated by the currently logged-in user's ID.
+ */
+export const verifyContact = async (myId, contactId, publicKey) => {
+    const storageKey = `verified_contacts_${myId}`;
+    const verifiedList = await get(storageKey) || {};
+    verifiedList[contactId] = publicKey;
+    await set(storageKey, verifiedList);
+};
+
+/** * Compares the key currently sent by the server against 
+ * your locally "pinned" version.
+ */
+export const checkVerificationStatus = async (myId, contactId, currentKey) => {
+    const storageKey = `verified_contacts_${myId}`;
+    const verifiedList = await get(storageKey) || {};
+    const pinnedKey = verifiedList[contactId];
+
+    if (!pinnedKey) return 'unverified'; 
+    if (pinnedKey === currentKey) return 'verified'; 
+    return 'changed'; // This triggers the Red Alert
+};
