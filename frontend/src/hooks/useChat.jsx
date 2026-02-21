@@ -49,8 +49,14 @@ const useChat = (recipient, setUnreadCounts, onSecurityAlert, bumpUserToTop) => 
     // 3. WebSocket Logic
     useEffect(() => {
         if (!token || !currentUserId || !unlockedKey) return;
-        const ws = new WebSocket(`ws://localhost:8000/chat/ws/${token}`);
+        let wsBase = import.meta.env.VITE_WS_BASE_URL || "ws://localhost:8000";
         
+        // If the app is on HTTPS, we MUST use WSS
+        if (window.location.protocol === 'https:' && wsBase.startsWith('ws:')) {
+            wsBase = wsBase.replace('ws:', 'wss:');
+        }
+
+        const ws = new WebSocket(`${wsBase}/chat/ws/${token}`);
         ws.onopen = () => {
             setSocket(ws);
             if (recipient?.id) {

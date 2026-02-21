@@ -7,7 +7,12 @@ const usePresence = () => {
     useEffect(() => {
         if (!token) return;
 
-        const socket = new WebSocket(`ws://localhost:8000/presence/ws/${token}`);
+        let wsBase = import.meta.env.VITE_WS_BASE_URL || "ws://localhost:8000";
+        if (window.location.protocol === 'https:' && wsBase.startsWith('ws:')) {
+            wsBase = wsBase.replace('ws:', 'wss:');
+        }
+
+        const socket = new WebSocket(`${wsBase}/presence/ws/${token}`);
 
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
